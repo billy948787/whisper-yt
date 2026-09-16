@@ -23,6 +23,7 @@ def acquire_video(source: str, work_dir: Path) -> tuple[Path, str]:
             raise FileNotFoundError(f"找不到影片檔案：{path}")
         return path, path.stem
 
+    source = _normalize_url(source)
     template = str(work_dir / "source.%(ext)s")
     options = {
         "format": "bv*+ba/b",
@@ -47,6 +48,12 @@ def acquire_video(source: str, work_dir: Path) -> tuple[Path, str]:
             f"yt-dlp 執行完成，但找不到下載的影片（video id: {info.get('id', 'unknown')}）。"
         )
     return max(candidates, key=lambda path: path.stat().st_size), title
+
+
+def _normalize_url(value: str) -> str:
+    for character in "?=&#%":
+        value = value.replace(f"\\{character}", character)
+    return value
 
 
 def _reported_download_paths(info: dict, downloader: YoutubeDL) -> list[Path]:

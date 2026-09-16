@@ -62,3 +62,23 @@ def test_acquire_video_uses_path_reported_by_ytdlp(tmp_path: Path) -> None:
 
     assert path == downloaded
     assert title == "Example"
+
+
+def test_acquire_video_removes_shell_escapes_from_url(tmp_path: Path) -> None:
+    downloaded = tmp_path / "source.mp4"
+    downloaded.write_bytes(b"video")
+    downloader = MagicMock()
+    downloader.__enter__.return_value = downloader
+    downloader.extract_info.return_value = {
+        "id": "abc123",
+        "title": "Example",
+        "filepath": str(downloaded),
+    }
+    downloader.prepare_filename.return_value = str(downloaded)
+
+    with patch("whisper_yt.media.YoutubeDL", return_value=downloader):
+        acquire_video(r"https://www.youtube.com/watch\?v\=abc123", tmp_path)
+
+    downloader.extract_info.assert_called_once_with(
+        "https://www.youtube.com/watch?v=abc123", download=True
+    )
