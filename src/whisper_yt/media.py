@@ -29,17 +29,38 @@ def acquire_video(source: str, work_dir: Path) -> tuple[Path, str]:
         "merge_output_format": "mp4",
         "outtmpl": template,
         "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
     }
     with YoutubeDL(options) as downloader:
         info = downloader.extract_info(source, download=True)
         title = str(info.get("title") or "youtube-video")
+        reported_paths = _reported_download_paths(info, downloader)
 
-    candidates = sorted(work_dir.glob("source.*"))
+    candidates = [path for path in reported_paths if path.is_file()]
+    candidates.extend(
+        path
+        for path in work_dir.iterdir()
+        if path.is_file() and path.suffix not in {".part", ".ytdl"}
+    )
+    candidates = list(dict.fromkeys(path.resolve() for path in candidates))
     if not candidates:
-        raise RuntimeError("yt-dlp 執行完成，但找不到下載的影片。")
-    return candidates[0].resolve(), title
+        raise RuntimeError(
+            f"yt-dlp 執行完成，但找不到下載的影片（video id: {info.get('id', 'unknown')}）。"
+        )
+    return max(candidates, key=lambda path: path.stat().st_size), title
+
+
+def _reported_download_paths(info: dict, downloader: YoutubeDL) -> list[Path]:
+    values = [info.get("filepath"), info.get("filename")]
+    values.extend(
+        item.get(key)
+        for item in info.get("requested_downloads") or []
+        for key in ("filepath", "filename")
+    )
+    try:
+        values.append(downloader.prepare_filename(info))
+    except KeyError:
+        pass
+    return [Path(value).expanduser().resolve() for value in values if value]
 
 
 def extract_audio(video: Path, audio: Path) -> None:
