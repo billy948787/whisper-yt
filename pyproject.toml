@@ -1,7 +1,7 @@
 [project]
 name = "whisper-yt"
 version = "0.1.0"
-description = "Transcribe videos with Whisper, translate subtitles with OpenCode Go, and burn them into MP4 files."
+description = "Transcribe videos with Whisper, translate subtitles via OpenCode Go or ChatGPT Codex, and burn them into MP4 files."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
