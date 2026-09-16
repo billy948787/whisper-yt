@@ -28,7 +28,7 @@ uv run whisper-yt "/path/to/video.mkv"
 uv run whisper-yt video.mp4 --model medium --no-burn
 ```
 
-翻譯預設走 OpenCode Go 的 `glm-5.3-flash`。互動式執行又沒指定 `--translation-model` 時，會列出 OpenCode Go 的模型和 variant（推理強度）讓你挑；也可以直接指定：
+翻譯預設走 OpenCode Go 的 `glm-5.3-flash`。互動式執行且沒指定 `--provider`、`--translation-model`、`--variant` 時，會先問你要用 OpenCode Go 還是 ChatGPT Codex，再列出該服務的模型和 variant（推理強度）讓你挑。非互動環境或想跳過選單就直接指定：
 
 ```bash
 uv run whisper-yt video.mp4 --translation-model deepseek-v4.1-flash --variant max
@@ -38,14 +38,14 @@ uv run whisper-yt video.mp4 --translation-model deepseek-v4.1-flash --variant ma
 
 ### 用 Codex 翻譯
 
-不想另外付 API 錢、想用 ChatGPT 訂閱額度的話：
+不想用 API key、想用 ChatGPT 訂閱額度的話：
 
 ```bash
 codex login   # 只需要做一次
 uv run whisper-yt video.mp4 --provider codex
 ```
 
-whisper-yt 直接讀 `~/.codex/auth.json`，token 過期會自己更新。互動式執行又沒指定模型時，會列出 `~/.codex/models_cache.json` 裡的模型和 variant 讓你選；非互動環境則沿用 `~/.codex/config.toml` 的 `model`。想寫死就 `--translation-model gpt-5.6-terra --variant high`。
+whisper-yt 直接讀 `~/.codex/auth.json`，token 過期會自己更新。不指定 `--translation-model` 時，互動模式會列出 `~/.codex/models_cache.json` 裡的模型和 variant；非互動環境則沿用 `~/.codex/config.toml` 的 `model`。
 
 ## 輸出
 

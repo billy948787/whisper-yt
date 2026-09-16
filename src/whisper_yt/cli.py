@@ -36,7 +36,9 @@ def main(
     model: Annotated[str, typer.Option(help="Whisper 模型名稱")] = "large-v3",
     device: Annotated[str, typer.Option(help="auto、cpu、cuda、mps 或裝置名稱")] = "auto",
     language: Annotated[str | None, typer.Option(help="來源語言代碼；留空自動偵測")] = None,
-    provider: Annotated[str, typer.Option("--provider", help="翻譯服務：opencode 或 codex")] = "opencode",
+    provider: Annotated[
+        str | None, typer.Option("--provider", help="翻譯服務：opencode 或 codex；留空會在互動模式問你")
+    ] = None,
     translation_model: Annotated[
         str | None, typer.Option(help="翻譯模型 ID；codex 預設沿用 ~/.codex/config.toml 的 model")
     ] = None,
@@ -60,6 +62,11 @@ def main(
     selected_device, device_description = detect_device(device)
     typer.echo(f"Whisper 裝置：{device_description}")
 
+    if provider is None:
+        if translation_model is None and variant is None and sys.stdin.isatty():
+            provider = _select_provider()
+        else:
+            provider = "opencode"
     if provider == "opencode":
         if translation_model is None and variant is None and sys.stdin.isatty():
             translation_model, variant = _select_opencode_model(DEFAULT_MODEL, api_url)
@@ -131,6 +138,13 @@ def main(
             typer.echo("燒錄字幕並輸出影片...")
             burn_subtitles(video, ass_file, output_video)
             typer.echo(f"影片：{output_video}")
+
+
+def _select_provider() -> str:
+    typer.echo("選擇翻譯服務：")
+    typer.echo(f"  1. OpenCode Go（預設 {DEFAULT_MODEL}，需要 API key）")
+    typer.echo(f"  2. ChatGPT Codex（預設 {codex_default_model()}，用 codex login 的額度）")
+    return "opencode" if _prompt_index("編號", 2) == 1 else "codex"
 
 
 def _select_opencode_model(default_slug: str, api_url: str) -> tuple[str, str | None]:
