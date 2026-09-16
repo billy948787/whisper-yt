@@ -1,0 +1,30 @@
+[project]
+name = "whisper-yt"
+version = "0.1.0"
+description = "Transcribe videos with Whisper, translate subtitles with OpenCode Go, and burn them into MP4 files."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "httpx>=0.28.1,<1",
+    "openai-whisper>=20250625",
+    "typer>=0.16.0,<1",
+    "yt-dlp>=2025.8.27",
+]
+
+[project.scripts]
+whisper-yt = "whisper_yt.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0,<9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whisper_yt"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
