@@ -22,7 +22,7 @@ export OPENCODE_GO_API_KEY="你的金鑰"
 
 `uv` 會依 `.python-version` 使用 Python 3.12。PyTorch 是否能使用 GPU 取決於作業系統、驅動與安裝的 PyTorch wheel；程式本身不寫死 ROCm 或 CUDA。
 
-目前這台電腦是 Radeon RX 9070 XT（16 GB）。若要在 AMD Linux 上使用 GPU，請依 [PyTorch 官方安裝頁](https://pytorch.org/get-started/locally/) 選擇符合系統的 ROCm wheel。NVIDIA、Apple Silicon 與純 CPU 的朋友不需修改程式碼，只需安裝適合其平台的 PyTorch。
+若要使用 GPU，請依 [PyTorch 官方安裝頁](https://pytorch.org/get-started/locally/) 安裝符合作業系統與硬體的 PyTorch。程式會自動偵測可用裝置，不需要修改程式碼。
 
 ## 使用方式
 
