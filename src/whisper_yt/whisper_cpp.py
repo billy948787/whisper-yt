@@ -15,6 +15,8 @@ import httpx
 from .models import Subtitle
 
 MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{name}"
+VAD_MODEL_NAME = "ggml-silero-v6.2.0.bin"
+VAD_MODEL_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/{name}"
 BACKEND_MARKER = "whisper-yt-backend.txt"
 GPU_BACKENDS = frozenset({"vulkan", "cuda", "hip"})
 BACKEND_LABELS = {
@@ -169,23 +171,20 @@ def parse_progress(line: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def ensure_model(
-    model: str,
-    model_dir: Path,
+def _download(
+    url: str,
+    path: Path,
     log: Log | None = None,
     on_progress: Callable[[int], None] | None = None,
 ) -> Path:
-    path = model_file(model, model_dir)
-    if path.is_file():
-        return path
-    model_dir.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if log:
-        log(f"下載 whisper.cpp 模型 {path.name}（首次使用時較久）...")
+        log(f"下載模型 {path.name}（首次使用時較久）...")
     temporary = path.with_suffix(".part")
     try:
         with httpx.stream(
             "GET",
-            MODEL_URL.format(name=path.name),
+            url,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
             timeout=httpx.Timeout(30, read=600),
@@ -214,6 +213,35 @@ def ensure_model(
     return path
 
 
+def ensure_model(
+    model: str,
+    model_dir: Path,
+    log: Log | None = None,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    path = model_file(model, model_dir)
+    if path.is_file():
+        return path
+    return _download(MODEL_URL.format(name=path.name), path, log, on_progress)
+
+
+def ensure_vad_model(
+    model_dir: Path,
+    log: Log | None = None,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path | None:
+    """取得 Silero VAD 模型；失敗時回傳 None（改以一般模式轉錄）。"""
+    path = model_dir / VAD_MODEL_NAME
+    if path.is_file():
+        return path
+    try:
+        return _download(VAD_MODEL_URL.format(name=path.name), path, log, on_progress)
+    except (httpx.HTTPError, OSError) as error:
+        if log:
+            log(f"無法取得 VAD 模型（{error}），將以一般模式轉錄。")
+        return None
+
+
 def transcribe(
     audio: Path,
     model: str,
@@ -228,12 +256,11 @@ def transcribe(
             "找不到 whisper.cpp 執行檔，請先執行 `scripts/build_whisper_cpp.sh`。"
         )
     kind = backend(binary)
-    model_path = ensure_model(
-        model,
-        model_dir,
-        log,
-        (lambda percent: on_progress("download", percent)) if on_progress else None,
+    download_progress = (
+        (lambda percent: on_progress("download", percent)) if on_progress else None
     )
+    model_path = ensure_model(model, model_dir, log, download_progress)
+    vad_path = ensure_vad_model(model_dir, log, download_progress)
     with tempfile.TemporaryDirectory(prefix="whisper-yt-cpp-") as temp:
         output_base = Path(temp) / "transcript"
         command = [
@@ -250,6 +277,8 @@ def transcribe(
             "-np",
             "-pp",
         ]
+        if vad_path is not None:
+            command += ["--vad", "-vm", str(vad_path)]
         if kind == "vulkan":
             index = pick_vulkan_device()
             if index is not None:

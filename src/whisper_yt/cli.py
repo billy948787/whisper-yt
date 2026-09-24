@@ -19,7 +19,7 @@ from .media import acquire_video, burn_subtitles, extract_audio, require_ffmpeg
 from .models import Subtitle
 from .progress import PhaseProgress
 from .subtitles import write_ass, write_srt
-from .transcribe import ENGINES, resolve_engine, transcribe
+from .transcribe import ENGINES, repeated_ratio, resolve_engine, transcribe
 from .translate import (
     DEFAULT_API_URL,
     DEFAULT_MODEL,
@@ -140,6 +140,11 @@ def main(
                 )
             finally:
                 progress.finish()
+            if len(subtitles) >= 20 and repeated_ratio(subtitles) >= 0.3:
+                typer.echo(
+                    "警告：轉錄結果有大量重複片段，可能是長靜音或音訊異常，"
+                    "建議確認來源音訊後再刪除快取重跑。"
+                )
             _save_cache(cache_file, subtitles, metadata)
         else:
             typer.echo("使用既有轉錄快取。")

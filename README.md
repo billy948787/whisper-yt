@@ -37,6 +37,8 @@ uv sync
 
 沒有建置 whisper.cpp 也能正常使用：程式會自動退回 PyTorch 路徑，並在 CUDA／ROCm、Apple MPS、CPU 之間自動挑選。想手動指定引擎用 `--engine whisper-cpp` 或 `--engine pytorch`。
 
+轉錄會啟用 Silero VAD 自動跳過長時間的靜音與非語音區段（避免 Whisper 在靜音處產生大量重複的幻聽字幕）；VAD 模型（約 1 MB）會在首次使用時自動下載。
+
 PyTorch 路徑要自己裝對 wheel（依作業系統、驅動和硬體參考[官方安裝頁](https://pytorch.org/get-started/locally/)）；只在沒建置 whisper.cpp 或想用 `--device` 指定裝置時才會用到。
 
 > whisper.cpp 的模型（`ggml-*.bin`）和 PyTorch 模型一樣放在 `output/.models/`，首次轉錄時自動下載（下載與轉錄都會顯示進度條）。

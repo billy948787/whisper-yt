@@ -4,7 +4,7 @@ import pytest
 
 from whisper_yt import whisper_cpp
 from whisper_yt.models import Subtitle
-from whisper_yt.transcribe import resolve_engine, transcribe
+from whisper_yt.transcribe import repeated_ratio, resolve_engine, transcribe
 
 
 def test_model_file_name_maps_to_ggml() -> None:
@@ -39,6 +39,57 @@ def test_parse_progress_reads_whisper_output() -> None:
     assert whisper_cpp.parse_progress("whisper_print_progress_callback: progress =  45%") == 45
     assert whisper_cpp.parse_progress("whisper_print_progress_callback: progress = 100%") == 100
     assert whisper_cpp.parse_progress("some other line") is None
+
+
+def test_ensure_vad_model_uses_existing_file(tmp_path: Path) -> None:
+    existing = tmp_path / whisper_cpp.VAD_MODEL_NAME
+    existing.write_bytes(b"vad")
+    assert whisper_cpp.ensure_vad_model(tmp_path) == existing
+
+
+def test_transcribe_uses_vad_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "whisper-cli"
+    binary.write_text("")
+    captured: dict[str, list[str]] = {}
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = iter([])
+            self.returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def kill(self) -> None:
+            pass
+
+        def wait(self) -> int:
+            return 0
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+        captured["command"] = command
+        return FakeProcess()
+
+    monkeypatch.setattr(whisper_cpp, "binary_path", lambda: binary)
+    monkeypatch.setattr(whisper_cpp, "backend", lambda path=None: "cpu")
+    monkeypatch.setattr(
+        whisper_cpp,
+        "ensure_model",
+        lambda model, model_dir, log=None, on_progress=None: tmp_path / "model.bin",
+    )
+    monkeypatch.setattr(
+        whisper_cpp,
+        "ensure_vad_model",
+        lambda model_dir, log=None, on_progress=None: tmp_path / "vad.bin",
+    )
+    monkeypatch.setattr(whisper_cpp.subprocess, "Popen", fake_popen)
+    with pytest.raises(RuntimeError):
+        whisper_cpp.transcribe(tmp_path / "a.wav", "large-v3", "en", tmp_path)
+    command = captured["command"]
+    assert "--vad" in command
+    assert command[command.index("-vm") + 1] == str(tmp_path / "vad.bin")
 
 
 def test_transcribe_raises_when_output_missing(
@@ -218,3 +269,11 @@ def test_transcribe_routes_to_whisper_cpp(
 def test_transcribe_rejects_unknown_engine(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         transcribe(tmp_path / "a.wav", "large-v3", "nope", "auto", None, tmp_path)
+
+
+def test_repeated_ratio_detects_hallucination_loops() -> None:
+    healthy = [Subtitle(i, 0, 1, f"line {i}") for i in range(1, 5)]
+    assert repeated_ratio(healthy) == 0.25
+    looped = [Subtitle(i, 0, 1, "Thank you.") for i in range(1, 5)]
+    assert repeated_ratio(looped) == 1.0
+    assert repeated_ratio([]) == 0.0

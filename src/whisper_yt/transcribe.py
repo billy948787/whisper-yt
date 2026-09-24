@@ -1,3 +1,4 @@
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -6,6 +7,14 @@ from . import whisper_cpp
 from .models import Subtitle
 
 ENGINES = ("auto", "whisper-cpp", "pytorch")
+
+
+def repeated_ratio(subtitles: list[Subtitle]) -> float:
+    """回傳出現最多次的文字占全部字幕的比例（用於偵測幻聽重複）。"""
+    if not subtitles:
+        return 0.0
+    counts = Counter(item.text for item in subtitles)
+    return counts.most_common(1)[0][1] / len(subtitles)
 
 
 def resolve_engine(engine: str, device: str = "auto") -> tuple[str, str]:
