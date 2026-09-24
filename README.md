@@ -84,6 +84,16 @@ uv run whisper-yt video.mp4 --provider codex
 
 whisper-yt 直接讀 `~/.codex/auth.json`，token 過期會自己更新。不指定 `--translation-model` 時，互動模式會列出 `~/.codex/models_cache.json` 裡的模型和 variant；非互動環境則沿用 `~/.codex/config.toml` 的 `model`。
 
+### YouTube 下載被擋時
+
+YouTube 偶爾會要求驗證（`Sign in to confirm you're not a bot`）。程式已預設使用可用的 JS runtime（deno → node → bun）並允許 yt-dlp 取得 JS challenge 元件。若仍被擋，在 `.env` 指定瀏覽器 cookies 即可：
+
+```bash
+WHISPER_YT_COOKIES_FROM_BROWSER=firefox:/home/you/.mozilla/firefox/xxxx.default-release
+```
+
+支援 `chrome`、`brave`、`firefox:<profile 路徑>` 等（同 yt-dlp 的 `--cookies-from-browser`）。其他開關：`WHISPER_YT_JS_RUNTIME=node`、`WHISPER_YT_NO_REMOTE_COMPONENTS=1`。
+
 ## 輸出
 
 跑完 `output/` 底下會有：

@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,6 +17,31 @@ def is_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def download_options(template: str) -> dict:
+    """yt-dlp 下載選項；可用環境變數調整（見 README）。"""
+    options: dict = {
+        "format": "bv*+ba/b",
+        "merge_output_format": "mp4",
+        "outtmpl": template,
+        "noplaylist": True,
+    }
+    runtime = os.getenv("WHISPER_YT_JS_RUNTIME")
+    if runtime:
+        options["js_runtimes"] = {runtime: {}}
+    elif shutil.which("deno") is None:
+        for candidate in ("node", "bun"):
+            if shutil.which(candidate) is not None:
+                options["js_runtimes"] = {candidate: {}}
+                break
+    if os.getenv("WHISPER_YT_NO_REMOTE_COMPONENTS") != "1":
+        options["remote_components"] = ["ejs:github"]
+    cookies = os.getenv("WHISPER_YT_COOKIES_FROM_BROWSER")
+    if cookies:
+        browser, _, profile = cookies.partition(":")
+        options["cookiesfrombrowser"] = (browser, profile or None, None, None)
+    return options
+
+
 def acquire_video(source: str, work_dir: Path) -> tuple[Path, str]:
     if not is_url(source):
         path = Path(source).expanduser().resolve()
@@ -25,12 +51,7 @@ def acquire_video(source: str, work_dir: Path) -> tuple[Path, str]:
 
     source = _normalize_url(source)
     template = str(work_dir / "source.%(ext)s")
-    options = {
-        "format": "bv*+ba/b",
-        "merge_output_format": "mp4",
-        "outtmpl": template,
-        "noplaylist": True,
-    }
+    options = download_options(template)
     with YoutubeDL(options) as downloader:
         info = downloader.extract_info(source, download=True)
         title = str(info.get("title") or "youtube-video")
