@@ -39,7 +39,7 @@ uv sync
 
 PyTorch 路徑要自己裝對 wheel（依作業系統、驅動和硬體參考[官方安裝頁](https://pytorch.org/get-started/locally/)）；只在沒建置 whisper.cpp 或想用 `--device` 指定裝置時才會用到。
 
-> whisper.cpp 的模型（`ggml-*.bin`）和 PyTorch 模型一樣放在 `output/.models/`，首次轉錄時自動下載。
+> whisper.cpp 的模型（`ggml-*.bin`）和 PyTorch 模型一樣放在 `output/.models/`，首次轉錄時自動下載（下載與轉錄都會顯示進度條）。
 
 ## 用法
 

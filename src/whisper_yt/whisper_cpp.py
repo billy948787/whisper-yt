@@ -2,9 +2,11 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,8 +26,11 @@ BACKEND_LABELS = {
 }
 USER_AGENT = "whisper-yt/0.1.0"
 DOWNLOAD_CHUNK = 8 * 1024 * 1024
+ERROR_TAIL_LINES = 40
+PROGRESS_PATTERN = re.compile(r"progress\s*=\s*(\d+)%")
 
 Log = Callable[[str], None]
+Progress = Callable[[str, int], None]
 
 
 def project_root() -> Path:
@@ -158,7 +163,18 @@ def model_file(model: str, model_dir: Path) -> Path:
     return model_dir / f"ggml-{model}.bin"
 
 
-def ensure_model(model: str, model_dir: Path, log: Log | None = None) -> Path:
+def parse_progress(line: str) -> int | None:
+    """解析 whisper-cli 的 `progress = 45%` 輸出。"""
+    match = PROGRESS_PATTERN.search(line)
+    return int(match.group(1)) if match else None
+
+
+def ensure_model(
+    model: str,
+    model_dir: Path,
+    log: Log | None = None,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
     path = model_file(model, model_dir)
     if path.is_file():
         return path
@@ -177,19 +193,22 @@ def ensure_model(model: str, model_dir: Path, log: Log | None = None) -> Path:
             response.raise_for_status()
             total = int(response.headers.get("content-length") or 0)
             done = 0
-            reported = 0
-            step = total // 10 if total else 0
+            reported = -1
             with temporary.open("wb") as handle:
                 for chunk in response.iter_bytes(DOWNLOAD_CHUNK):
                     handle.write(chunk)
                     done += len(chunk)
-                    if log and total and step and done - reported >= step and done < total:
-                        reported = done
-                        log(f"下載模型 {path.name}：{done * 100 // total}%")
+                    if on_progress and total:
+                        percent = min(done * 100 // total, 100)
+                        if percent != reported:
+                            reported = percent
+                            on_progress(percent)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
     temporary.replace(path)
+    if on_progress:
+        on_progress(100)
     if log:
         log(f"模型已就緒：{path}")
     return path
@@ -201,6 +220,7 @@ def transcribe(
     language: str | None,
     model_dir: Path,
     log: Log | None = None,
+    on_progress: Progress | None = None,
 ) -> tuple[list[Subtitle], dict[str, object]]:
     binary = binary_path()
     if binary is None:
@@ -208,7 +228,12 @@ def transcribe(
             "找不到 whisper.cpp 執行檔，請先執行 `scripts/build_whisper_cpp.sh`。"
         )
     kind = backend(binary)
-    model_path = ensure_model(model, model_dir, log)
+    model_path = ensure_model(
+        model,
+        model_dir,
+        log,
+        (lambda percent: on_progress("download", percent)) if on_progress else None,
+    )
     with tempfile.TemporaryDirectory(prefix="whisper-yt-cpp-") as temp:
         output_base = Path(temp) / "transcript"
         command = [
@@ -223,6 +248,7 @@ def transcribe(
             "-of",
             str(output_base),
             "-np",
+            "-pp",
         ]
         if kind == "vulkan":
             index = pick_vulkan_device()
@@ -230,13 +256,35 @@ def transcribe(
                 command += ["-dev", str(index)]
         elif kind == "cpu":
             command += ["-t", str(physical_cores())]
-        completed = subprocess.run(command, capture_output=True, text=True)
-        if completed.returncode != 0:
-            details = (completed.stderr or completed.stdout or "").strip()
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+        )
+        tail: deque[str] = deque(maxlen=ERROR_TAIL_LINES)
+        try:
+            for line in process.stdout or ():
+                tail.append(line.rstrip())
+                if on_progress is not None:
+                    percent = parse_progress(line)
+                    if percent is not None:
+                        on_progress("transcribe", percent)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+        if process.returncode != 0:
+            details = "\n".join(tail).strip()
             raise RuntimeError(
-                f"whisper.cpp 轉錄失敗（exit {completed.returncode}）：{details[-1500:]}"
+                f"whisper.cpp 轉錄失敗（exit {process.returncode}）：{details[-1500:]}"
             )
-        data = json.loads(output_base.with_suffix(".json").read_text(encoding="utf-8"))
+        json_path = output_base.with_suffix(".json")
+        if not json_path.is_file():
+            details = "\n".join(tail).strip()
+            raise RuntimeError(f"whisper.cpp 沒有產生轉錄輸出：{details[-1500:]}")
+        data = json.loads(json_path.read_text(encoding="utf-8"))
     subtitles = parse_transcription(data)
     metadata: dict[str, object] = {
         "language": detected_language(data) or language,

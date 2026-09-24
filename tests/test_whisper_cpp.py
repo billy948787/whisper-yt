@@ -35,6 +35,44 @@ def test_parse_transcription_reads_offsets() -> None:
     assert whisper_cpp.detected_language(data) == "en"
 
 
+def test_parse_progress_reads_whisper_output() -> None:
+    assert whisper_cpp.parse_progress("whisper_print_progress_callback: progress =  45%") == 45
+    assert whisper_cpp.parse_progress("whisper_print_progress_callback: progress = 100%") == 100
+    assert whisper_cpp.parse_progress("some other line") is None
+
+
+def test_transcribe_raises_when_output_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "whisper-cli"
+    binary.write_text("")
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = iter(["failed to read audio file\n"])
+            self.returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def kill(self) -> None:
+            pass
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr(whisper_cpp, "binary_path", lambda: binary)
+    monkeypatch.setattr(whisper_cpp, "backend", lambda path=None: "cpu")
+    monkeypatch.setattr(
+        whisper_cpp,
+        "ensure_model",
+        lambda model, model_dir, log=None, on_progress=None: tmp_path / "model.bin",
+    )
+    monkeypatch.setattr(whisper_cpp.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    with pytest.raises(RuntimeError, match="沒有產生轉錄輸出"):
+        whisper_cpp.transcribe(tmp_path / "a.wav", "large-v3", "en", tmp_path)
+
+
 def test_vulkan_devices_and_pick_discrete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -163,6 +201,7 @@ def test_transcribe_routes_to_whisper_cpp(
         language: str | None,
         model_dir: Path,
         log: object = None,
+        on_progress: object = None,
     ) -> tuple[list[Subtitle], dict[str, object]]:
         calls.append((audio, model, language, model_dir))
         return [Subtitle(1, 0, 1, "hi")], {"language": "en"}

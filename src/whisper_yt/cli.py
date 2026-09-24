@@ -17,6 +17,7 @@ from .codex import (
 )
 from .media import acquire_video, burn_subtitles, extract_audio, require_ffmpeg
 from .models import Subtitle
+from .progress import PhaseProgress
 from .subtitles import write_ass, write_srt
 from .transcribe import ENGINES, resolve_engine, transcribe
 from .translate import (
@@ -125,15 +126,20 @@ def main(
             audio = work_dir / "audio.wav"
             typer.echo("擷取音訊並執行 Whisper 轉錄...")
             extract_audio(video, audio)
-            subtitles, metadata = transcribe(
-                audio,
-                model,
-                engine_name,
-                device,
-                language,
-                output_dir / ".models",
-                log=typer.echo,
-            )
+            progress = PhaseProgress({"download": "下載 Whisper 模型", "transcribe": "Whisper 轉錄"})
+            try:
+                subtitles, metadata = transcribe(
+                    audio,
+                    model,
+                    engine_name,
+                    device,
+                    language,
+                    output_dir / ".models",
+                    log=typer.echo,
+                    on_progress=progress,
+                )
+            finally:
+                progress.finish()
             _save_cache(cache_file, subtitles, metadata)
         else:
             typer.echo("使用既有轉錄快取。")

@@ -79,11 +79,14 @@ def transcribe(
     language: str | None,
     model_dir: Path,
     log: Callable[[str], None] | None = None,
+    on_progress: Callable[[str, int], None] | None = None,
 ) -> tuple[list[Subtitle], dict[str, Any]]:
     if engine not in ENGINES:
         raise ValueError(f"未知的 Whisper 引擎：{engine}")
     if engine == "whisper-cpp":
-        return whisper_cpp.transcribe(audio, model_name, language, model_dir, log)
+        return whisper_cpp.transcribe(
+            audio, model_name, language, model_dir, log=log, on_progress=on_progress
+        )
     selected_device, _ = detect_device(device)
     return _transcribe_pytorch(audio, model_name, selected_device, language, model_dir)
 
