@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from dotenv import load_dotenv
 
 from .codex import (
     CodexTranslator,
@@ -17,7 +18,7 @@ from .codex import (
 from .media import acquire_video, burn_subtitles, extract_audio, require_ffmpeg
 from .models import Subtitle
 from .subtitles import write_ass, write_srt
-from .transcribe import detect_device, transcribe
+from .transcribe import ENGINES, resolve_engine, transcribe
 from .translate import (
     DEFAULT_API_URL,
     DEFAULT_MODEL,
@@ -34,7 +35,12 @@ def main(
     source: Annotated[str, typer.Argument(help="YouTube 網址或本機影片路徑")],
     output_dir: Annotated[Path, typer.Option("--output-dir", "-o")] = Path("output"),
     model: Annotated[str, typer.Option(help="Whisper 模型名稱")] = "large-v3",
-    device: Annotated[str, typer.Option(help="auto、cpu、cuda、mps 或裝置名稱")] = "auto",
+    device: Annotated[
+        str, typer.Option(help="PyTorch 引擎的裝置：auto、cpu、cuda、mps 或裝置名稱")
+    ] = "auto",
+    engine: Annotated[
+        str, typer.Option(help="Whisper 引擎：auto、whisper-cpp（較快）或 pytorch")
+    ] = "auto",
     language: Annotated[str | None, typer.Option(help="來源語言代碼；留空自動偵測")] = None,
     provider: Annotated[
         str | None, typer.Option("--provider", help="翻譯服務：opencode 或 codex；留空會在互動模式問你")
@@ -56,11 +62,24 @@ def main(
     ] = False,
 ) -> None:
     """轉錄影片、翻譯為台灣繁體中文，並將字幕燒錄至 MP4。"""
+    load_dotenv(Path.cwd() / ".env")
     require_ffmpeg()
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    selected_device, device_description = detect_device(device)
-    typer.echo(f"Whisper 裝置：{device_description}")
+    if engine not in ENGINES:
+        raise typer.BadParameter(
+            "engine 只支援 auto、whisper-cpp 或 pytorch。", param_hint="--engine"
+        )
+    if engine == "whisper-cpp" and device != "auto":
+        raise typer.BadParameter(
+            "--device 只適用於 PyTorch 引擎；whisper.cpp 會自動選擇後端與裝置。",
+            param_hint="--device",
+        )
+    try:
+        engine_name, device_description = resolve_engine(engine, device)
+    except (RuntimeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Whisper 引擎：{device_description}")
 
     if provider is None:
         if translation_model is None and variant is None and sys.stdin.isatty():
@@ -107,7 +126,13 @@ def main(
             typer.echo("擷取音訊並執行 Whisper 轉錄...")
             extract_audio(video, audio)
             subtitles, metadata = transcribe(
-                audio, model, selected_device, language, output_dir / ".models"
+                audio,
+                model,
+                engine_name,
+                device,
+                language,
+                output_dir / ".models",
+                log=typer.echo,
             )
             _save_cache(cache_file, subtitles, metadata)
         else:
@@ -116,10 +141,14 @@ def main(
         untranslated = [item for item in subtitles if not item.translated_text]
         if untranslated:
             typer.echo(f"透過 {service} 翻譯 {len(untranslated)} 段字幕...")
-            translator.translate(untranslated)
             metadata["translation_provider"] = provider
             metadata["translation_model"] = translation_model
-            _save_cache(cache_file, subtitles, metadata)
+
+            def save_progress(completed: int, total: int) -> None:
+                _save_cache(cache_file, subtitles, metadata)
+                typer.echo(f"翻譯進度：{completed}/{total} 批")
+
+            translator.translate(untranslated, on_batch_complete=save_progress)
         else:
             typer.echo("使用既有翻譯快取。")
 

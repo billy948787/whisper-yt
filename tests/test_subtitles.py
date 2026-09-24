@@ -1,4 +1,5 @@
 import json
+from threading import Barrier
 
 import httpx
 import pytest
@@ -7,6 +8,7 @@ from whisper_yt.models import Subtitle
 from whisper_yt.subtitles import ass_timestamp, srt_timestamp
 from whisper_yt.translate import (
     OpenCodeGoTranslator,
+    SubtitleTranslator,
     _make_batches,
     _parse_translations,
     list_models,
@@ -113,3 +115,60 @@ def test_opencode_translator_sends_reasoning_effort(
 
     assert "reasoning_effort" not in payloads[0]
     assert payloads[1]["reasoning_effort"] == "max"
+
+
+def test_translation_runs_batches_concurrently_and_checkpoints() -> None:
+    barrier = Barrier(2, timeout=2)
+
+    class ParallelTranslator(SubtitleTranslator):
+        def _request(self, batch: list[Subtitle]) -> dict[int, str]:
+            barrier.wait()
+            return {item.id: f"譯文 {item.id}" for item in batch}
+
+    subtitles = [Subtitle(i, 0, 1, f"text {i}") for i in range(1, 3)]
+    snapshots: list[tuple[int, int, int]] = []
+    ParallelTranslator().translate(
+        subtitles,
+        batch_chars=1,
+        workers=2,
+        on_batch_complete=lambda done, total: snapshots.append(
+            (done, total, sum(bool(item.translated_text) for item in subtitles))
+        ),
+    )
+    assert snapshots == [(1, 2, 1), (2, 2, 2)]
+    assert [item.translated_text for item in subtitles] == ["譯文 1", "譯文 2"]
+
+
+def test_translation_keeps_successful_batches_after_failure() -> None:
+    class FailingTranslator(SubtitleTranslator):
+        def _request(self, batch: list[Subtitle]) -> dict[int, str]:
+            if batch[0].id == 1:
+                raise RuntimeError("failed")
+            return {item.id: "成功" for item in batch}
+
+    subtitles = [Subtitle(i, 0, 1, "text") for i in range(1, 3)]
+    checkpoints: list[int] = []
+    with pytest.raises(RuntimeError, match="failed"):
+        FailingTranslator().translate(
+            subtitles,
+            batch_chars=1,
+            on_batch_complete=lambda done, total: checkpoints.append(done),
+        )
+    assert checkpoints == [1]
+    assert [item.translated_text for item in subtitles] == ["", "成功"]
+
+
+def test_rate_limit_does_not_split_into_more_requests() -> None:
+    calls = 0
+
+    class RateLimitedTranslator(SubtitleTranslator):
+        def _request(self, batch: list[Subtitle]) -> dict[int, str]:
+            nonlocal calls
+            calls += 1
+            response = httpx.Response(429, request=httpx.Request("POST", "https://example.com"))
+            raise httpx.HTTPStatusError("rate limited", request=response.request, response=response)
+
+    subtitles = [Subtitle(i, 0, 1, "text") for i in range(1, 3)]
+    with pytest.raises(httpx.HTTPStatusError):
+        RateLimitedTranslator().translate(subtitles, workers=1)
+    assert calls == 1

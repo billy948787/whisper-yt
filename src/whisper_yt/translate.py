@@ -3,6 +3,8 @@ import os
 import time
 import uuid
 from collections.abc import Iterable
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 
@@ -70,21 +72,47 @@ def model_variants() -> dict[str, list[str]]:
 
 
 class SubtitleTranslator:
-    def translate(self, subtitles: list[Subtitle], batch_chars: int = 6000) -> None:
-        for batch in _make_batches(subtitles, batch_chars):
-            self._translate_batch(batch)
+    def translate(
+        self,
+        subtitles: list[Subtitle],
+        batch_chars: int = 6000,
+        workers: int = 4,
+        on_batch_complete: Callable[[int, int], None] | None = None,
+    ) -> None:
+        batches = _make_batches(subtitles, batch_chars)
+        if not batches:
+            return
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(self._translate_batch, batch): batch for batch in batches}
+            completed = 0
+            first_error: Exception | None = None
+            for future in as_completed(futures):
+                try:
+                    translations = future.result()
+                except Exception as error:
+                    if first_error is None:
+                        first_error = error
+                    continue
+                for subtitle in futures[future]:
+                    subtitle.translated_text = translations[subtitle.id]
+                completed += 1
+                if on_batch_complete is not None:
+                    on_batch_complete(completed, len(batches))
+            if first_error is not None:
+                raise first_error
 
-    def _translate_batch(self, batch: list[Subtitle]) -> None:
+    def _translate_batch(self, batch: list[Subtitle]) -> dict[int, str]:
         try:
-            translations = self._request(batch)
-            for subtitle in batch:
-                subtitle.translated_text = translations[subtitle.id]
-        except (KeyError, ValueError, httpx.HTTPError):
+            return self._request(batch)
+        except (KeyError, ValueError, httpx.HTTPError) as error:
+            # Splitting malformed responses may help, but rate limits and server
+            # failures should not multiply the number of requests.
+            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code != 413:
+                raise
             if len(batch) == 1:
                 raise
             middle = len(batch) // 2
-            self._translate_batch(batch[:middle])
-            self._translate_batch(batch[middle:])
+            return self._translate_batch(batch[:middle]) | self._translate_batch(batch[middle:])
 
     def _request(self, batch: list[Subtitle]) -> dict[int, str]:
         raise NotImplementedError

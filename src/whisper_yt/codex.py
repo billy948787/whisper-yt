@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 
 import httpx
 
@@ -152,6 +153,7 @@ class CodexTranslator(SubtitleTranslator):
         self.model = model or default_model()
         self.effort = effort or default_effort(self.model)
         self.credentials = credentials or load_credentials(auth_file)
+        self._credential_lock = Lock()
         self.timeout = timeout
         self.session_id = session_id or str(uuid.uuid4())
 
@@ -191,18 +193,23 @@ class CodexTranslator(SubtitleTranslator):
 
     def _post(self, payload: dict[str, object]) -> str:
         response = self._send(payload)
+        token = self.credentials.access_token
         if response.status_code == 401:
-            self.credentials = refresh_credentials(self.credentials)
+            with self._credential_lock:
+                if self.credentials.access_token == token:
+                    self.credentials = refresh_credentials(self.credentials)
             response = self._send(payload)
         response.raise_for_status()
         return _collect_response_text(response.text)
 
     def _send(self, payload: dict[str, object]) -> httpx.Response:
-        if _token_expired(self.credentials.access_token):
-            self.credentials = refresh_credentials(self.credentials)
+        with self._credential_lock:
+            if _token_expired(self.credentials.access_token):
+                self.credentials = refresh_credentials(self.credentials)
+            credentials = self.credentials
         headers = {
-            "Authorization": f"Bearer {self.credentials.access_token}",
-            "chatgpt-account-id": self.credentials.account_id,
+            "Authorization": f"Bearer {credentials.access_token}",
+            "chatgpt-account-id": credentials.account_id,
             "originator": "codex_cli_rs",
             "OpenAI-Beta": "responses=experimental",
             "session_id": self.session_id,
