@@ -262,6 +262,7 @@ def transcribe(
     model_path = ensure_model(model, model_dir, log, download_progress)
     vad_path = ensure_vad_model(model_dir, log, download_progress)
     with tempfile.TemporaryDirectory(prefix="whisper-yt-cpp-") as temp:
+        # -mc 0 關閉跨視窗的上文，避免解碼陷入重複迴圈後一路延續到檔尾。
         output_base = Path(temp) / "transcript"
         command = [
             str(binary),
@@ -276,6 +277,8 @@ def transcribe(
             str(output_base),
             "-np",
             "-pp",
+            "-mc",
+            "0",
         ]
         if vad_path is not None:
             command += ["--vad", "-vm", str(vad_path)]

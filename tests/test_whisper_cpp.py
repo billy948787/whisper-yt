@@ -90,6 +90,7 @@ def test_transcribe_uses_vad_flags(
     command = captured["command"]
     assert "--vad" in command
     assert command[command.index("-vm") + 1] == str(tmp_path / "vad.bin")
+    assert command[command.index("-mc") + 1] == "0"
 
 
 def test_transcribe_raises_when_output_missing(
